@@ -15,3 +15,28 @@ test.json
 #config.py
 .env
 *.html
+__pycache__/
+
+# Python packaging build artifacts
+*.egg-info/
+build/
+dist/
+*.egg
+.eggs/
+
+# Development and testing
+.pytest_cache/
+.coverage
+.mypy_cache/
+.tox/
+
+# IDEs
+.idea/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/

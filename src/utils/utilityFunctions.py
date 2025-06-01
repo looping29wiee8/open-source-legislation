@@ -29,17 +29,17 @@ import os
 
 OPENAI_API_KEY_NAME = "Personal Key"
 openai_client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=os.getenv("OSL_OPENAI_API_KEY"),
 )
 
 ANTHROPIC_API_KEY_NAME = "Personal Key"
 anthropic_client = Anthropic(
-    api_key=os.getenv("OPENAI_API_KEY")
+    api_key=os.getenv("OSL_ANTHROPIC_API_KEY")
 )
 
 
 instructor_client = instructor.patch(OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=os.getenv("OSL_OPENAI_API_KEY"),
 ))
 
 
