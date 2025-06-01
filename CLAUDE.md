@@ -131,3 +131,5 @@ psql -U myuser -d mydatabase -f us_az_statutes.sql
 ## Database Connection
 
 Set up PostgreSQL connection and populate database config file as needed for your environment. The system supports both local development and cloud deployment (Supabase).
+
+
