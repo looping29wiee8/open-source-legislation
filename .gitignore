@@ -1,7 +1,7 @@
 .vscode/
 env/
 myenv/
-**/data/
+#**/data/
 **/sourceData/
 **/extractedData/
 **/.DS_Store
@@ -12,5 +12,6 @@ logs/
 # Any file ending in .log
 *.log
 test.json
-config.py
+#config.py
 .env
+*.html
