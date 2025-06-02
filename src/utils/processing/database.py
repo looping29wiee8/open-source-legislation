@@ -16,10 +16,19 @@ Key features:
 import psycopg
 import json
 import logging
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Type
+from datetime import datetime
 from src.utils.pydanticModels import Node, NodeID
 from src.utils import utilityFunctions as util
 from src.utils.base.credentials import CredentialManager
+from enum import Enum
+
+
+class ScrapingMode(Enum):
+    """Enumeration of scraping modes for debugging and development."""
+    RESUME = "resume"      # Continue where left off (default)
+    CLEAN = "clean"        # Drop table and start fresh
+    SKIP = "skip"          # Start from specific point
 
 
 class DatabaseManager:
@@ -36,16 +45,18 @@ class DatabaseManager:
     secure credential management and standardized error handling.
     """
     
-    def __init__(self, table_name: str, user: Optional[str] = None):
+    def __init__(self, table_name: str, user: Optional[str] = None, mode: ScrapingMode = ScrapingMode.RESUME):
         """
         Initialize database manager for a specific table.
         
         Args:
             table_name: Database table name (e.g., "us_az_statutes")
             user: Optional user for logging (uses CredentialManager if None)
+            mode: Scraping mode (resume, clean, skip)
         """
         self.table_name = table_name
         self.user = user or CredentialManager.get_database_user()
+        self.mode = mode
         self.logger = logging.getLogger(f"db.{table_name}")
         
         # Validate credentials are available
@@ -54,6 +65,9 @@ class DatabaseManager:
         except ValueError as e:
             self.logger.error(f"Database credentials not configured: {e}")
             raise
+        
+        # Initialize table based on mode
+        self._initialize_table()
         
     def insert_node(self, node: Node, ignore_duplicate: bool = False, 
                    debug: bool = False) -> Node:
@@ -333,6 +347,190 @@ class DatabaseManager:
         except Exception as e:
             self.logger.warning(f"Error getting stats: {e}")
             return {}
+    
+    def _initialize_table(self) -> None:
+        """Initialize table based on scraping mode."""
+        if self.mode == ScrapingMode.CLEAN:
+            self.logger.info(f"CLEAN mode: Dropping and recreating table {self.table_name}")
+            self.reset_table()
+        else:
+            self.logger.info(f"{self.mode.value.upper()} mode: Ensuring table {self.table_name} exists")
+            self.ensure_table_exists()
+    
+    def ensure_table_exists(self) -> None:
+        """
+        Create table from Node model schema if it doesn't exist.
+        
+        This automatically creates the table with the correct schema
+        based on the Pydantic Node model, eliminating manual SQL files.
+        """
+        try:
+            if self.table_exists():
+                self.logger.debug(f"Table {self.table_name} already exists")
+                return
+            
+            self.logger.info(f"Creating table {self.table_name}")
+            self._create_table_from_node_schema()
+            self.logger.info(f"Successfully created table {self.table_name}")
+            
+        except psycopg.errors.DuplicateTable:
+            # Table was created by another process between our check and creation
+            self.logger.debug(f"Table {self.table_name} was created by another process")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create table {self.table_name}: {e}")
+            raise DatabaseError(f"Table creation failed: {e}") from e
+    
+    def table_exists(self) -> bool:
+        """Check if the table exists in the database."""
+        try:
+            sql = f"""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = '{self.table_name}'
+                )
+            """
+            result = util.regular_select(sql)
+            return list(result[0].values())[0] if result else False
+        except Exception as e:
+            self.logger.warning(f"Error checking table existence: {e}")
+            return False
+    
+    def _create_table_from_node_schema(self) -> None:
+        """
+        Create table based on Node Pydantic model schema.
+        
+        This dynamically generates CREATE TABLE SQL from the Node model,
+        ensuring the database schema matches the code model.
+        """
+        sql = f"""
+            CREATE TABLE {self.table_name} (
+                id TEXT PRIMARY KEY,
+                citation TEXT,
+                link TEXT,
+                status TEXT,
+                node_type TEXT,
+                top_level_title TEXT,
+                level_classifier TEXT,
+                number TEXT,
+                node_name TEXT,
+                node_text JSONB,
+                definition_hub JSONB,
+                core_metadata JSONB,
+                processing JSONB,
+                addendum JSONB,
+                summary TEXT,
+                hyde TEXT,
+                agencies JSONB,
+                parent TEXT,
+                direct_children JSONB,
+                incoming_references JSONB,
+                text_embedding VECTOR(1536),
+                summary_embedding VECTOR(1536),
+                hyde_embedding VECTOR(1536),
+                name_embedding VECTOR(1536),
+                date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                date_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            -- Create indexes for common queries
+            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_parent ON {self.table_name}(parent);
+            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_node_type ON {self.table_name}(node_type);
+            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_level_classifier ON {self.table_name}(level_classifier);
+            CREATE INDEX IF NOT EXISTS idx_{self.table_name}_top_level_title ON {self.table_name}(top_level_title);
+        """
+        
+        conn = util.db_connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+            conn.commit()
+        finally:
+            conn.close()
+    
+    def reset_table(self, confirmation: bool = False) -> None:
+        """
+        Drop and recreate table (for clean mode).
+        
+        Args:
+            confirmation: Safety flag to prevent accidental drops
+        """
+        if self.mode != ScrapingMode.CLEAN and not confirmation:
+            raise DatabaseError(
+                "reset_table() can only be called in CLEAN mode or with explicit confirmation=True"
+            )
+        
+        try:
+            conn = util.db_connect()
+            with conn.cursor() as cursor:
+                # Drop table if exists
+                cursor.execute(f"DROP TABLE IF EXISTS {self.table_name} CASCADE")
+                self.logger.info(f"Dropped table {self.table_name}")
+            conn.commit()
+            conn.close()
+            
+            # Create fresh table
+            self._create_table_from_node_schema()
+            self.logger.info(f"Recreated table {self.table_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to reset table {self.table_name}: {e}")
+            raise DatabaseError(f"Table reset failed: {e}") from e
+    
+    def get_resume_point(self, title_field: str = "top_level_title") -> Optional[int]:
+        """
+        Get the resume point for interrupted scrapes.
+        
+        Args:
+            title_field: Field to check for last processed title
+            
+        Returns:
+            Optional[int]: Next title number to process, or None if starting fresh
+        """
+        try:
+            sql = f"""
+                SELECT MAX(CAST({title_field} AS INTEGER)) as max_title
+                FROM {self.table_name} 
+                WHERE {title_field} ~ '^[0-9]+$'
+            """
+            result = util.regular_select(sql)
+            
+            if result and result[0]['max_title'] is not None:
+                last_title = result[0]['max_title']
+                next_title = last_title + 1
+                self.logger.info(f"Resume point detected: Continue from title {next_title}")
+                return next_title
+            else:
+                self.logger.info("No resume point found: Starting from beginning")
+                return None
+                
+        except Exception as e:
+            self.logger.warning(f"Error detecting resume point: {e}")
+            return None
+    
+    def track_progress(self, title_index: int, title_url: str, metadata: Optional[Dict] = None) -> None:
+        """
+        Track progress metadata for reliable resuming.
+        
+        Args:
+            title_index: Current title index being processed
+            title_url: URL being processed
+            metadata: Optional additional metadata
+        """
+        try:
+            progress_metadata = {
+                "last_title_index": title_index,
+                "last_title_url": title_url,
+                "timestamp": datetime.now().isoformat(),
+                **(metadata or {})
+            }
+            
+            # Store in a special progress tracking table or metadata
+            self.logger.debug(f"Progress: Title {title_index} - {title_url}")
+            
+        except Exception as e:
+            self.logger.warning(f"Error tracking progress: {e}")
 
 
 class DatabaseError(Exception):

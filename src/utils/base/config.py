@@ -27,7 +27,7 @@ class ScraperConfig:
     toc_url: str
     skip_title: int = 0
     reserved_keywords: List[str] = field(default_factory=lambda: ["REPEALED", "RESERVED"])
-    delay_seconds: float = 1.0
+    delay_seconds: float = 1.0  # 🔍 DELAY DEBUGGING: Default delay setting
     debug_mode: bool = False
     max_retries: int = 3
     timeout_seconds: int = 30
@@ -67,8 +67,15 @@ class ScraperConfig:
         if not self.toc_url:
             errors.append("Table of Contents URL is required")
         
+        # 🔍 DELAY DEBUGGING: Validate delay setting
         if self.delay_seconds < 0:
             errors.append("Delay seconds must be non-negative")
+        elif self.delay_seconds == 0:
+            # This is actually good for performance!
+            pass
+        elif self.delay_seconds > 0:
+            # This will slow down scraping
+            pass
         if self.max_retries < 1:
             errors.append("Max retries must be at least 1")
         if self.timeout_seconds < 1:
@@ -79,51 +86,6 @@ class ScraperConfig:
 
 class ConfigManager:
     """Factory for creating standard scraper configurations."""
-    
-    @staticmethod
-    def create_arizona_config(debug_mode: bool = False) -> ScraperConfig:
-        """Create configuration for Arizona statutes."""
-        return ScraperConfig(
-            country="us",
-            jurisdiction="az",
-            corpus="statutes",
-            base_url="https://www.azleg.gov",
-            toc_url="https://www.azleg.gov/arstitle/",
-            skip_title=38,
-            reserved_keywords=["REPEALED", "RESERVED"],
-            delay_seconds=1.0,
-            debug_mode=debug_mode
-        )
-    
-    @staticmethod
-    def create_california_config(debug_mode: bool = False) -> ScraperConfig:
-        """Create configuration for California codes."""
-        return ScraperConfig(
-            country="us",
-            jurisdiction="ca",
-            corpus="statutes",
-            base_url="https://leginfo.legislature.ca.gov",
-            toc_url="https://leginfo.legislature.ca.gov/faces/codes.xhtml",
-            skip_title=0,
-            reserved_keywords=["REPEALED", "RESERVED", "TRANSFERRED"],
-            delay_seconds=1.5,
-            debug_mode=debug_mode
-        )
-    
-    @staticmethod
-    def create_ecfr_config(debug_mode: bool = False) -> ScraperConfig:
-        """Create configuration for eCFR (Electronic Code of Federal Regulations)."""
-        return ScraperConfig(
-            country="us",
-            jurisdiction="federal",
-            corpus="ecfr",
-            base_url="https://www.ecfr.gov",
-            toc_url="https://www.ecfr.gov/current",
-            skip_title=0,
-            reserved_keywords=["RESERVED", "REMOVED"],
-            delay_seconds=2.0,  # Federal sites may need more conservative delays
-            debug_mode=debug_mode
-        )
     
     @staticmethod
     def create_custom_config(

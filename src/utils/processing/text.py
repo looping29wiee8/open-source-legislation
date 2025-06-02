@@ -246,7 +246,7 @@ class TextProcessor:
     def extract_addendum(
         text: str, 
         patterns: Optional[List[str]] = None,
-        addendum_type: AddendumType = AddendumType.HISTORICAL
+        addendum_type: str = "history"
     ) -> Optional[Addendum]:
         """
         Extract addendum information using standardized patterns.
@@ -293,11 +293,22 @@ class TextProcessor:
             if match:
                 addendum_text = match.group(1).strip()
                 
-                return Addendum(
-                    addendum_type=addendum_type,
-                    addendum_text=addendum_text,
-                    source_text=text
+                # Create AddendumType object
+                addendum_obj = AddendumType(
+                    type=addendum_type,
+                    text=addendum_text
                 )
+                
+                # Create Addendum with appropriate field based on type
+                if addendum_type == "history":
+                    return Addendum(history=addendum_obj)
+                elif addendum_type == "source":
+                    return Addendum(source=addendum_obj)
+                elif addendum_type == "authority":
+                    return Addendum(authority=addendum_obj)
+                else:
+                    # Default to history
+                    return Addendum(history=addendum_obj)
                 
         return None
     

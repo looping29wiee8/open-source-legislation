@@ -328,11 +328,12 @@ def db_connect(row_factory=None):
     conn = None
     try:
         # connect to the PostgreSQL server
-        db_name = os.getenv("DB_NAME")
-        db_host = os.getenv("DB_HOST")
-        db_username = os.getenv("DB_USERNAME")
-        db_password = os.getenv("DB_PASSWORD")
-        db_port = os.getenv("DB_PORT")
+        # Updated to use OSL_DB_* environment variables for consistency with new framework
+        db_name = os.getenv("OSL_DB_NAME") or os.getenv("DB_NAME")
+        db_host = os.getenv("OSL_DB_HOST") or os.getenv("DB_HOST")
+        db_username = os.getenv("OSL_DB_USER") or os.getenv("DB_USERNAME")
+        db_password = os.getenv("OSL_DB_PASSWORD") or os.getenv("DB_PASSWORD")
+        db_port = os.getenv("OSL_DB_PORT") or os.getenv("DB_PORT")
 
         conn = psycopg.connect(dbname=db_name,host=db_host,user=db_username,password=db_password,port=db_port,client_encoding="utf8")
         

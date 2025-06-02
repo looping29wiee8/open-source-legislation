@@ -47,7 +47,7 @@ CORPUS = "statutes"
 TABLE_NAME =  f"{COUNTRY}_{JURISDICTION}_{CORPUS}"
 BASE_URL = "https://www.azleg.gov"
 TOC_URL = "https://www.azleg.gov/arstitle/"
-SKIP_TITLE = 38
+SKIP_TITLE = 0
 
 
 

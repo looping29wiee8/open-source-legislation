@@ -17,6 +17,7 @@ Improvements over Phase 2:
 
 # Single line replaces 34 lines of path setup
 from src.utils.base import setup_project_path, BaseScraper, ConfigManager
+from src.utils.processing.database import ScrapingMode
 setup_project_path()
 
 # Standard imports (unchanged)
@@ -52,19 +53,55 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
     Still preserves all working Arizona parsing logic exactly.
     """
     
-    def __init__(self, debug_mode: bool = False):
-        """Initialize Arizona scraper with Phase 3 standardized infrastructure."""
-        config = ConfigManager.create_arizona_config(debug_mode=debug_mode)
-        super().__init__(config)
+    def __init__(self, debug_mode: bool = False, mode: ScrapingMode = ScrapingMode.RESUME, 
+                 skip_title: Optional[int] = None, timeout_minutes: Optional[int] = None,
+                 max_titles: Optional[int] = None, max_nodes: Optional[int] = None, validation_mode: bool = False):
+        """Initialize Arizona scraper with enhanced debugging and timeout features."""
+        # Arizona-specific configuration defined inline (not in shared config.py)
+        config = ConfigManager.create_custom_config(
+            country="us",
+            jurisdiction="az",
+            corpus="statutes",
+            base_url="https://www.azleg.gov",
+            toc_url="https://www.azleg.gov/arstitle/",
+            skip_title=0,  # Will be overridden by mode logic
+            reserved_keywords=["REPEALED", "RESERVED", "TRANSFERRED"],
+            delay_seconds=0,
+            debug_mode=debug_mode
+        )
+        super().__init__(config, mode=mode, skip_title=skip_title, timeout_minutes=timeout_minutes,
+                         max_titles=max_titles, max_nodes=max_nodes, validation_mode=validation_mode)
         
         self.scraper_dir = self.get_scraper_directory()
         
-        # NEW: Initialize standardized web fetcher for Arizona
-        self.web_fetcher = WebFetcherFactory.create_arizona_fetcher()
+        # 🔍 DELAY DEBUGGING: Initialize web fetcher with config delay verification
+        if self.config.delay_seconds > 0:
+            self.logger.warning(f"⚠️  DELAY CONFIGURED: {self.config.delay_seconds}s per request will slow scraping!")
+        else:
+            self.logger.info(f"🚀 ZERO DELAY OPTIMIZED: {self.config.delay_seconds}s = maximum speed")
+            
+        self.web_fetcher = WebFetcher(
+            delay_seconds=self.config.delay_seconds,  # Respect config setting
+            max_retries=3,
+            timeout=30,
+            custom_headers={
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            }
+        )
         
-        # Track batch insertion for performance
+        # 🔍 DELAY DEBUGGING: Verify web fetcher delay setting
+        self.logger.info(f"🔧 WebFetcher initialized with delay_seconds={self.web_fetcher.delay_seconds}")
+        
+        # OPTIMIZED: Large batch insertion for performance
         self.batch_nodes = []
-        self.batch_size = 50
+        self.batch_size = 1000  # Large batches for maximum database throughput
+        
+        # OPTIMIZED: Performance tracking
+        self.batch_stats = {
+            'total_batches': 0,
+            'total_nodes': 0,
+            'fallback_operations': 0
+        }
         
         # NEW: Arizona-specific text processing configuration
         self.az_text_config = {
@@ -108,12 +145,24 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
             for i, title_url in enumerate(all_titles):
                 if i < self.config.skip_title:
                     continue
+                
+                # NEW: Check stopping conditions (timeout, limits, etc.)
+                if not self.should_continue():
+                    self.logger.info(f"🛑 Stopping scraping: {self._stop_reason}")
+                    break
                     
                 self.logger.info(f"Scraping title {i+1}/{len(all_titles)}: {title_url}")
+                
+                # NEW: Track progress for reliable resuming
+                self.track_title_progress(i, title_url, {"total_titles": len(all_titles)})
+                
                 self._scrape_per_title(title_url)
                 
-            # Flush any remaining batch nodes
-            self._flush_batch()
+                # NEW: Track title processing for stopping conditions (after processing)
+                self.increment_title_count()
+                
+            # OPTIMIZED: Flush all remaining batch nodes
+            self._flush_all_batches()
             
             # Display enhanced statistics
             self._show_enhanced_stats()
@@ -162,6 +211,10 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
             chapter_container = title_container.parent.parent.parent
             
             for i, chapter in enumerate(chapter_container.find_all(class_="accordion", recursive=False)):
+                # NEW: Check timeout during chapter processing
+                if not self.should_continue():
+                    self.logger.info(f"🛑 Stopping during chapter processing: {self._stop_reason}")
+                    return
                 
                 header = chapter.find("h5")
                 link = header.find("a")
@@ -194,6 +247,11 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
                 article_container = header.next_sibling
                 if article_container:
                     for j, article in enumerate(article_container.find_all(class_="article")):
+                        # NEW: Check timeout during article processing
+                        if not self.should_continue():
+                            self.logger.info(f"🛑 Stopping during article processing: {self._stop_reason}")
+                            return
+                            
                         try:
                             self._process_article(article, chapter_node, top_level_title, j)
                         except Exception as e:
@@ -254,56 +312,104 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
         
         NEW: Advanced text processing and content analysis
         NEW: Citation and addendum extraction
-        PRESERVED: Arizona section finding logic
+        FIXED: Arizona section finding logic - sections are in <ul> lists, not class="section"
         """
-        # PRESERVED: Arizona section finding logic
-        section_elements = article.find_all(class_="section")
+        # FIXED: Arizona section finding logic - sections are in <ul> lists with statute links
+        # Each section is a <ul> with 2 <li> items: link (class="colleft") and title (class="colright")
+        section_lists = article.find_all("ul")
         
-        for section_elem in section_elements:
+        for section_list in section_lists:
+            # NEW: Check timeout during section processing (where most time is spent)
+            if not self.should_continue():
+                self.logger.info(f"🛑 Stopping during section processing: {self._stop_reason}")
+                return
+                
             try:
-                section_link = section_elem.find("a")
+                # Look for statute links in the list
+                left_items = section_list.find_all("li", class_="colleft")
+                right_items = section_list.find_all("li", class_="colright")
+                
+                # Validate this is a statute section list (has both left and right items)
+                if not left_items or not right_items:
+                    continue
+                    
+                left_item = left_items[0]
+                right_item = right_items[0]
+                
+                # Get the statute link from the left item
+                section_link = left_item.find("a", class_="stat")
                 if not section_link:
                     continue
                     
                 # NEW: Enhanced text processing for section data
-                section_text_raw = section_link.get_text()
-                section_text = TextProcessor.clean_text(section_text_raw)
+                section_number_raw = section_link.get_text()
+                section_number = TextProcessor.clean_text(section_number_raw)
                 section_href = section_link.get("href", "")
                 
-                # Extract section number (Arizona-specific logic preserved)
-                if " " in section_text:
-                    section_number = section_text.split(" ")[1]
+                # Get section title from the right item  
+                section_title_raw = right_item.get_text()
+                section_title = TextProcessor.clean_text(section_title_raw)
+                
+                # Combine section number and title for full name
+                section_text = f"{section_number} {section_title}".strip()
+                
+                # Extract just the numeric part for section_number field
+                # Arizona sections are like "1-101", "1-102", etc.
+                if "-" in section_number:
+                    section_number_clean = section_number
                 else:
                     continue
                 
-                # NEW: Extract and process section content if available
-                section_content_container = section_elem.find_next("div", class_="section-content")
+                # RESTORED: Fetch individual section content (was working in original scraper)
+                # Individual Arizona statute pages DO serve content via .content-sidebar-wrap .first
                 node_text = None
                 addendum = None
                 
-                if section_content_container:
-                    # NEW: Use TextProcessor for content extraction
-                    node_text = TextProcessor.extract_node_text(
-                        section_content_container,
-                        tag_filter=["p", "div", "li"],
-                        custom_paragraph_patterns=[r"^\([a-z]\)", r"^\d+\."]
-                    )
+                try:
+                    # Construct full URL for individual section
+                    section_url = f"{self.config.base_url}{section_href}" if section_href.startswith("/") else section_href
                     
-                    # NEW: Extract addendum using standardized patterns
-                    content_text = TextProcessor.clean_text(section_content_container)
-                    addendum = TextProcessor.extract_addendum(
-                        content_text,
-                        patterns=self.az_text_config["addendum_patterns"],
-                        addendum_type=AddendumType.HISTORICAL
-                    )
+                    # Fetch individual section page content
+                    section_soup = self.web_fetcher.get_soup(section_url)
+                    
+                    # Extract content using same logic as original scraper
+                    text_container = section_soup.find(class_="content-sidebar-wrap")
+                    if text_container:
+                        first_element = text_container.find(class_="first")
+                        if first_element:
+                            # Use TextProcessor to extract structured content
+                            node_text = TextProcessor.extract_node_text(
+                                first_element,
+                                tag_filter=["p"],
+                                custom_paragraph_patterns=None  # Use default paragraph detection
+                            )
+                            
+                            # Also extract full text for addendum analysis
+                            full_text = TextProcessor.clean_text(first_element)
+                            if full_text:
+                                # Extract addendum using Arizona-specific patterns
+                                addendum = TextProcessor.extract_addendum(
+                                    full_text,
+                                    patterns=self.az_text_config["addendum_patterns"]
+                                )
+                            
+                            #self.logger.debug(f"Extracted content for {section_number_clean}: {len(full_text) if full_text else 0} characters")
+                        else:
+                            self.logger.warning(f"No .first element found in {section_url}")
+                    else:
+                        self.logger.warning(f"No .content-sidebar-wrap found in {section_url}")
+                        
+                except Exception as content_error:
+                    self.logger.warning(f"Failed to fetch content for {section_number_clean}: {content_error}")
+                    # Continue with node creation even if content extraction fails
                 
                 # NEW: Generate Arizona-style citation
-                citation = f"A.R.S. § {top_level_title}-{section_number}"
+                citation = f"A.R.S. § {section_number_clean}"
                 
                 # NEW: Use NodeFactory for content node creation
                 section_node = self.create_content_node(
                     parent_id=article_node.node_id,
-                    number=section_number,
+                    number=section_number_clean,
                     name=section_text,
                     link=f"{self.config.base_url}{section_href}" if section_href.startswith("/") else section_href,
                     citation=citation,
@@ -312,26 +418,11 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
                     addendum=addendum
                 )
                 
-                # NEW: Content analysis and classification
-                if node_text:
-                    content_full = " ".join([p.text for p in node_text.to_list_paragraph()])
-                    
-                    # Analyze content type
-                    content_type = TextProcessor._classify_paragraph(content_full)
-                    if content_type:
-                        if not section_node.core_metadata:
-                            section_node.core_metadata = {}
-                        section_node.core_metadata["content_type"] = content_type
-                    
-                    # Extract citations within the content
-                    citations = TextProcessor.extract_citation(
-                        content_full,
-                        {"arizona": self.az_text_config["citation_patterns"]}
-                    )
-                    if citations:
-                        if not section_node.core_metadata:
-                            section_node.core_metadata = {}
-                        section_node.core_metadata["internal_citations"] = citations
+                # Add metadata about the section title for future analysis
+                if section_title:
+                    if not section_node.core_metadata:
+                        section_node.core_metadata = {}
+                    section_node.core_metadata["section_title"] = section_title
                 
                 # Add to batch
                 self._add_to_batch(section_node)
@@ -355,28 +446,47 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
             return
             
         try:
-            self.logger.info(f"Batch inserting {len(self.batch_nodes)} nodes")
+            self.logger.info(f"📦 Batch inserting {len(self.batch_nodes)} nodes")
             
             successful_nodes = self.batch_insert_nodes(
                 self.batch_nodes, 
                 ignore_duplicates=True
             )
             
-            self.logger.info(f"Successfully inserted {len(successful_nodes)} nodes")
+            self.logger.info(f"✅ Batch complete: {len(successful_nodes)} nodes inserted")
+            
+            # Track performance metrics
+            self.batch_stats['total_batches'] += 1
+            self.batch_stats['total_nodes'] += len(successful_nodes)
             
         except Exception as e:
-            self.logger.error(f"Batch insertion failed: {e}")
-            
-            # Fallback to individual insertions
-            self.logger.info("Falling back to individual insertions")
-            for node in self.batch_nodes:
-                try:
-                    self.insert_node_safely(node)
-                except Exception as individual_error:
-                    self.logger.warning(f"Failed to insert {node.node_id}: {individual_error}")
-        
+            self.logger.error(f"❌ Batch insertion failed: {e}")
+            self.batch_stats['fallback_operations'] += 1
+            self._fallback_individual_insert()
         finally:
             self.batch_nodes.clear()
+    
+    def _fallback_individual_insert(self) -> None:
+        """Fallback to individual insertions with error tracking."""
+        self.logger.info(f"🔄 Falling back to individual insertions for {len(self.batch_nodes)} nodes")
+        
+        successful = 0
+        failed = 0
+        
+        for node in self.batch_nodes:
+            try:
+                self.insert_node_safely(node)
+                successful += 1
+            except Exception as individual_error:
+                failed += 1
+                self.logger.warning(f"❌ Failed individual insert {node.node_id}: {individual_error}")
+        
+        self.logger.info(f"📈 Individual insertion results: {successful} success, {failed} failed")
+    
+    def _flush_all_batches(self) -> None:
+        """Flush all remaining batches (called at end of scraping)."""
+        self.logger.info("🧹 Flushing remaining batch")
+        self._flush_batch()
     
     def _show_enhanced_stats(self) -> None:
         """
@@ -406,21 +516,67 @@ class ArizonaStatutesScraperPhase3(BaseScraper):
             self.logger.info(f"Success rate: {web_stats['success_rate']:.2%}")
             self.logger.info(f"Total delay time: {web_stats['total_delay_time']:.1f}s")
             self.logger.info(f"Average delay: {web_stats['average_delay']:.1f}s")
+            
+            # OPTIMIZED: Batch performance statistics
+            self.logger.info("=== BATCH PERFORMANCE STATISTICS ===")
+            self.logger.info(f"Total batches: {self.batch_stats['total_batches']}")
+            self.logger.info(f"Total nodes processed: {self.batch_stats['total_nodes']}")
+            
+            if self.batch_stats['total_batches'] > 0:
+                avg_batch_size = self.batch_stats['total_nodes'] / self.batch_stats['total_batches']
+                self.logger.info(f"Average batch size: {avg_batch_size:.1f} nodes")
+                
+            if self.batch_stats['fallback_operations'] > 0:
+                self.logger.info(f"⚠️  Fallback operations: {self.batch_stats['fallback_operations']}")
+            else:
+                self.logger.info("✅ No fallback operations required")
                     
         except Exception as e:
             self.logger.warning(f"Could not retrieve statistics: {e}")
 
 
-# Standardized main function
+# Enhanced main function with debugging modes
 def main():
-    """Main entry point with Phase 3 enhancements."""
+    """Main entry point with enhanced debugging workflow."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Arizona Statutes Scraper with Enhanced Debugging")
+    parser.add_argument("--mode", choices=["resume", "clean", "skip"], default="resume",
+                       help="Scraping mode: resume (continue where left off), clean (start fresh), skip (start from specific title)")
+    parser.add_argument("--skip-title", type=int, help="Title number to skip to (for skip mode or manual override)")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--timeout", type=int, help="Timeout in minutes for debugging/validation runs")
+    parser.add_argument("--max-titles", type=int, help="Maximum number of titles to process (for validation)")
+    parser.add_argument("--max-nodes", type=int, help="Maximum number of nodes to create (for validation)")
+    parser.add_argument("--validation", action="store_true", help="Enable validation mode (sets automatic limits)")
+    
+    args = parser.parse_args()
+    
+    # Convert string mode to enum
+    mode_map = {
+        "resume": ScrapingMode.RESUME,
+        "clean": ScrapingMode.CLEAN, 
+        "skip": ScrapingMode.SKIP
+    }
+    mode = mode_map[args.mode]
+    
     try:
-        # Create and run scraper
-        scraper = ArizonaStatutesScraperPhase3(debug_mode=True)
+        # Create and run scraper with specified mode and timeout options
+        scraper = ArizonaStatutesScraperPhase3(
+            debug_mode=args.debug,
+            mode=mode,
+            skip_title=args.skip_title,
+            timeout_minutes=args.timeout,
+            max_titles=args.max_titles,
+            max_nodes=args.max_nodes,
+            validation_mode=args.validation
+        )
         scraper.scrape()
         
+        print(f"\n✅ Scraping completed successfully in {args.mode} mode!")
+        
     except Exception as e:
-        print(f"Scraping failed: {e}")
+        print(f"\n❌ Scraping failed: {e}")
         raise
 
 

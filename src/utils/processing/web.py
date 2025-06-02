@@ -81,7 +81,7 @@ class WebFetcher:
         retry_strategy = Retry(
             total=max_retries,
             status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "OPTIONS"],
+            allowed_methods=["HEAD", "GET", "OPTIONS"],  # Updated from method_whitelist
             backoff_factor=1,  # Exponential backoff
         )
         
@@ -152,12 +152,16 @@ class WebFetcher:
             soup = fetcher.get_soup(url, delay=3.0)
             ```
         """
-        # Apply rate limiting
+        # Apply rate limiting with comprehensive delay debugging
         delay_time = delay if delay is not None else self.delay_seconds
+        
+        # 🔍 DELAY DEBUGGING: Always log delay decisions
         if delay_time > 0:
-            self.logger.debug(f"Applying rate limit delay: {delay_time}s")
+            self.logger.warning(f"⏰ APPLYING DELAY: {delay_time}s (config: {self.delay_seconds}, override: {delay})")
             time.sleep(delay_time)
             self.stats['total_delay_time'] += delay_time
+        else:
+            self.logger.debug(f"🚀 NO DELAY: delay_time={delay_time} (config: {self.delay_seconds}, override: {delay})")
         
         self.stats['requests_made'] += 1
         
@@ -205,9 +209,14 @@ class WebFetcher:
             requests.Response: Raw response object
         """
         delay_time = delay if delay is not None else self.delay_seconds
+        
+        # 🔍 DELAY DEBUGGING: Log raw response delays
         if delay_time > 0:
+            self.logger.warning(f"⏰ RAW RESPONSE DELAY: {delay_time}s")
             time.sleep(delay_time)
             self.stats['total_delay_time'] += delay_time
+        else:
+            self.logger.debug(f"🚀 RAW RESPONSE NO DELAY: {delay_time}s")
         
         self.stats['requests_made'] += 1
         
@@ -241,9 +250,14 @@ class WebFetcher:
             requests.Response: Response object
         """
         delay_time = delay if delay is not None else self.delay_seconds
+        
+        # 🔍 DELAY DEBUGGING: Log POST delays
         if delay_time > 0:
+            self.logger.warning(f"⏰ POST DELAY: {delay_time}s")
             time.sleep(delay_time)
             self.stats['total_delay_time'] += delay_time
+        else:
+            self.logger.debug(f"🚀 POST NO DELAY: {delay_time}s")
         
         self.stats['requests_made'] += 1
         
@@ -370,8 +384,13 @@ class SeleniumWebFetcher:
             raise WebFetchError("Selenium driver not initialized")
         
         delay_time = delay if delay is not None else self.delay_seconds
+        
+        # 🔍 DELAY DEBUGGING: Log Selenium delays
         if delay_time > 0:
+            self.logger.warning(f"⏰ SELENIUM DELAY: {delay_time}s")
             time.sleep(delay_time)
+        else:
+            self.logger.debug(f"🚀 SELENIUM NO DELAY: {delay_time}s")
         
         try:
             self.logger.debug(f"Fetching URL with Selenium: {url}")

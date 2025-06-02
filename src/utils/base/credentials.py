@@ -25,7 +25,7 @@ class CredentialManager:
             ValueError: If OSL_DB_USER environment variable is not set
         """
         user = os.getenv('OSL_DB_USER')
-        if not user:
+        if user is None:
             raise ValueError(
                 "OSL_DB_USER environment variable not set. "
                 "Please set it to your database username."
@@ -48,8 +48,9 @@ class CredentialManager:
         
         for var in required_vars:
             value = os.getenv(var)
-            if not value:
+            if value is None:
                 raise ValueError(f"Required environment variable {var} not set")
+            # Allow empty passwords for databases with no authentication
             config[var.lower().replace('osl_db_', '')] = value
             
         return config

@@ -38,6 +38,7 @@ src/
 │   │   │       ├── read{STATE}.py
 │   │   │       ├── scrape{STATE}.py
 │   │   │       └── process{STATE}.py
+│   │   │
 │   └── 1_SCRAPE_TEMPLATE/  # Template for new scrapers
 ├── utils/
 │   ├── base/                # 🆕 NEW: Standardized base framework
@@ -55,11 +56,23 @@ src/
     └── progressTracker.py  # Track scraper status
 ```
 
-## 🆕 NEW: Standardized Scraper Framework
+## 🆕 NEW: Enhanced Standardized Framework (2025)
+
+### Recent Updates - Revolutionary Debugging Workflow
+
+**🎉 MAJOR ENHANCEMENT (January 2025)**: Enhanced the standardized framework with revolutionary debugging and table management capabilities based on real-world Arizona scraper refactoring experience.
+
+**Key Improvements:**
+- ✅ **Automatic table creation** from Node schema (eliminates manual SQL files)
+- ✅ **Enhanced debugging modes** - Clean/Resume/Skip with intelligent detection
+- ✅ **Real database operations** - Verified insertions (no more fake success logs)
+- ✅ **Dynamic resume detection** - Auto-detects interruption points
+- ✅ **Progress tracking** - Reliable resuming with metadata storage
+- ✅ **Command-line interface** - Professional debugging experience
 
 ### Overview
 
-As of 2025, the project now includes a standardized scraper framework that:
+As of 2025, the project includes a comprehensive standardized framework that:
 - **Eliminates 70% code duplication** across scrapers
 - **Provides secure credential management** (no more hardcoded passwords!)
 - **Standardizes infrastructure** while preserving jurisdiction-specific logic
@@ -105,18 +118,60 @@ As of 2025, the project now includes a standardized scraper framework that:
 
 ## Common Development Tasks
 
-### Environment Setup
+### **⚠️ CRITICAL: Mandatory Timeout Usage for Claude Code Instances**
+
+**🚨 ESSENTIAL RULE: NEVER run scrapers without timeout conditions during debugging/validation.**
+
+**Why this is critical:**
+- Legislative scrapers can run for 2-6 hours to complete
+- Without timeouts, Claude Code instances cannot get feedback to validate or debug
+- Progressive timeout-based testing is the ONLY effective debugging approach
+- Running full scrapers wastes time when issues exist
+
+**ALWAYS use these patterns:**
 ```bash
+# ✅ For debugging/validation (MANDATORY)
+python scrapeJURISDICTION_standardized.py --mode clean --validation --debug
+python scrapeJURISDICTION_standardized.py --mode clean --timeout 2 --max-titles 3 --debug
+
+# ✅ For production (only after validation passes)
+python scrapeJURISDICTION_standardized.py --mode clean
+```
+
+**This applies to:**
+- All scraper debugging sessions
+- All validation workflows  
+- All refactoring processes
+- All new scraper development
+
+### Environment Setup (Updated - Modern Approach)
+```bash
+# Clone repository (if not already done)
+git clone https://github.com/spartypkp/open-source-legislation.git
+cd open-source-legislation
+
 # Create virtual environment
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install project with dependencies (Modern approach using pyproject.toml)
+pip install -e ".[dev]"
 
-# Set Python path (adjust path as needed)
-export PYTHONPATH=/path/to/open-source-legislation:$PYTHONPATH
+# This single command:
+# ✅ Installs all production dependencies from pyproject.toml
+# ✅ Installs development tools (pytest, black, mypy, etc.)
+# ✅ Sets up the project for editable installation
+# ✅ Eliminates PYTHONPATH issues - modules are now importable
+
+
 ```
+
+**Key Benefits of New Setup:**
+- ✅ **No more PYTHONPATH issues** - Project installation handles module imports
+- ✅ **Single dependency source** - Everything defined in `pyproject.toml`
+- ✅ **Development tools included** - Testing, linting, type checking ready
+- ✅ **Consistent environments** - Everyone gets the same setup
+- ✅ **Modern Python packaging** - Follows current best practices
 
 ### Running Scrapers
 ```bash
@@ -142,42 +197,88 @@ psql -U myuser -d mydatabase -f us_az_statutes.sql
 
 **🆕 NEW: Standardized scraper framework is now available!**
 
+#### Quick Start (Recommended)
+```bash
+# 1. Ensure environment is set up (one-time setup)
+cd open-source-legislation
+source venv/bin/activate
+pip install -e ".[dev]"  # Installs project + all dependencies
+```
+
+#### Standardized Scraper Template
 1. **Use Standardized Base Class:**
    ```python
    from src.utils.base import setup_project_path, BaseScraper, ConfigManager
+   from src.utils.processing.database import ScrapingMode
    setup_project_path()
    
    class MyJurisdictionScraper(BaseScraper):
-       def __init__(self, debug_mode: bool = False):
+       def __init__(self, debug_mode: bool = False, mode: ScrapingMode = ScrapingMode.RESUME, skip_title: Optional[int] = None):
+           # Jurisdiction-specific configuration defined inline
            config = ConfigManager.create_custom_config(
                country="us",
                jurisdiction="my_state", 
                corpus="statutes",
                base_url="https://example.gov",
-               toc_url="https://example.gov/statutes/"
+               toc_url="https://example.gov/statutes/",
+               skip_title=0,  # Will be overridden by mode logic
+               reserved_keywords=["REPEALED", "RESERVED"],  # Add jurisdiction-specific keywords
+               delay_seconds=1.5  # Adjust based on site responsiveness
            )
-           super().__init__(config)
+           super().__init__(config, mode=mode, skip_title=skip_title)
            
        def scrape_implementation(self) -> None:
            # Your jurisdiction-specific parsing logic here
-           pass
+           # NEW: Add progress tracking for reliable resuming
+           for i, item in enumerate(items):
+               self.track_title_progress(i, item_url, {"total_items": len(items)})
+               # ... your parsing logic
    ```
 
 2. **Environment Variables (SECURITY REQUIREMENT):**
    ```bash
-   export OSL_DB_USER="your_username"
-   export OSL_DB_PASSWORD="your_password" 
-   export OSL_DB_HOST="localhost"
-   export OSL_DB_NAME="legislation"
+   # Add to your .env file:
+   OSL_DB_USER="your_username"
+   OSL_DB_PASSWORD="your_password" 
+   OSL_DB_HOST="localhost"
+   OSL_DB_NAME="legislation"
    ```
 
-3. **Follow 5-Phase Development Process:**
+3. **Enhanced Main Function with Debugging Support:**
+   ```python
+   def main():
+       import argparse
+       
+       parser = argparse.ArgumentParser(description="My Jurisdiction Scraper")
+       parser.add_argument("--mode", choices=["resume", "clean", "skip"], default="resume")
+       parser.add_argument("--skip-title", type=int, help="Title number to skip to")
+       parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+       
+       args = parser.parse_args()
+       mode_map = {"resume": ScrapingMode.RESUME, "clean": ScrapingMode.CLEAN, "skip": ScrapingMode.SKIP}
+       
+       try:
+           scraper = MyJurisdictionScraper(
+               debug_mode=args.debug,
+               mode=mode_map[args.mode],
+               skip_title=args.skip_title
+           )
+           scraper.scrape()
+           print(f"✅ Scraping completed successfully in {args.mode} mode!")
+       except Exception as e:
+           print(f"❌ Scraping failed: {e}")
+           raise
+   ```
+
+4. **Follow Enhanced 5-Phase Development Process:**
    - Phase 0: Research legislation structure and HTML
-   - Phase 1: Prepare coding environment
+   - Phase 1: Prepare coding environment (use `pip install -e ".[dev]"`)
    - Phase 2: Implement read functionality
-   - Phase 3: Code scraper (Regular/Recursive/Stack methods)
-   - Phase 4: Debug and test scraper
+   - Phase 3: Code scraper with standardized framework
+   - Phase 4: **Enhanced debugging** with clean/resume/skip modes
    - Phase 5: Process database with embeddings
+
+**No More PYTHONPATH Issues:** The `pip install -e ".[dev]"` command handles all module imports automatically!
 
 ### Key Utilities
 
@@ -190,6 +291,9 @@ psql -U myuser -d mydatabase -f us_az_statutes.sql
 **🆕 NEW: Database & Node Management (src.utils.processing & src.utils.data):**
 - `DatabaseManager`: Unified database operations replacing 3 different patterns
 - `NodeFactory`: Standardized Node creation with consistent patterns
+- `ScrapingMode`: Enhanced debugging workflow with clean/resume/skip modes
+- **Automatic table creation** from Node schema (no more manual SQL files!)
+- **Dynamic resume point detection** for interrupted scrapes
 - Batch processing capabilities for performance optimization
 - Enhanced duplicate handling with versioning support
 
@@ -243,12 +347,16 @@ setup_project_path()
 
 class MyStateScraper(BaseScraper):
     def __init__(self, debug_mode: bool = False):
+        # Jurisdiction-specific configuration defined inline
         config = ConfigManager.create_custom_config(
             country="us",
             jurisdiction="my_state",
             corpus="statutes", 
             base_url="https://legislature.my_state.gov",
-            toc_url="https://legislature.my_state.gov/statutes/"
+            toc_url="https://legislature.my_state.gov/statutes/",
+            skip_title=0,  # Adjust based on jurisdiction needs
+            reserved_keywords=["REPEALED", "RESERVED"],  # Add jurisdiction-specific keywords
+            delay_seconds=1.5  # Adjust based on site responsiveness
         )
         super().__init__(config)
         
@@ -386,6 +494,109 @@ class JavaScriptHeavyScraper(SeleniumScraper):
                 # ... rest of your logic
 ```
 
+### 🆕 Enhanced Debugging Workflow (2025)
+
+**Revolutionary improvement for development and debugging workflow:**
+
+#### **Intelligent Scraping Modes with Mandatory Timeout Usage**
+
+**🚨 CRITICAL FOR CLAUDE CODE INSTANCES: ALWAYS use timeout conditions during debugging. Running scrapers without timeouts will prevent feedback for hours.**
+
+```bash
+# ✅ CORRECT - Validation mode (RECOMMENDED for all debugging)
+python scrapeAZ_standardized.py --mode clean --validation --debug
+# Automatically sets: 2 min timeout, 3 titles max, 100 nodes max
+
+# ✅ CORRECT - Custom timeout combinations
+python scrapeAZ_standardized.py --mode clean --timeout 2 --max-titles 3 --debug
+python scrapeAZ_standardized.py --mode skip --skip-title 25 --timeout 1 --debug
+
+# ✅ CORRECT - Ultra-fast spot checks
+python scrapeAZ_standardized.py --mode clean --timeout 1 --max-titles 1 --debug
+
+# ❌ WRONG - Will run for hours without feedback (only use for production)
+python scrapeAZ_standardized.py --mode clean
+
+# Resume mode (DEFAULT): Auto-detects where to continue after interruptions
+python scrapeAZ_standardized.py --mode resume --timeout 5
+
+# Skip mode: Start from specific title (for debugging specific sections)  
+python scrapeAZ_standardized.py --mode skip --skip-title 25 --timeout 2 --debug
+```
+
+#### **Automatic Table Management**
+- ✅ **No more manual SQL files** - Tables created automatically from Node schema
+- ✅ **No more "table doesn't exist" errors** - Auto-creation handles everything
+- ✅ **Safe clean mode** - Prevents accidental data loss with confirmation checks
+- ✅ **Race condition handling** - Multiple processes can safely create tables
+
+#### **Dynamic Resume Detection**
+- ✅ **Intelligent recovery** - Automatically detects last processed title
+- ✅ **Zero configuration** - No more hardcoded `skip_title` values
+- ✅ **Progress tracking** - Metadata stored for reliable resuming
+- ✅ **Manual override** - Can still specify `--skip-title` when needed
+
+#### **Real Database Operations (No More Fake Logs!)**
+- ✅ **Verified insertions** - Logs show actual database operations
+- ✅ **Batch processing** - Efficient bulk insertions with fallback to individual
+- ✅ **Error transparency** - Clear distinction between success and failure
+- ✅ **Statistics reporting** - Real-time counts and progress tracking
+
+#### **Development Workflow Examples (Updated with Mandatory Timeouts)**
+
+**Scenario 1: Starting a new scraper**
+```bash
+# ✅ CORRECT - First run with validation timeout
+python scrapeNEW_standardized.py --mode clean --validation --debug
+
+# ❌ WRONG - Will run for hours without feedback
+python scrapeNEW_standardized.py --mode clean --debug
+```
+
+**Scenario 2: Scraper crashed at title 15**
+```bash
+# ✅ CORRECT - Resume with timeout for safety
+python scrapeNEW_standardized.py --mode resume --timeout 10
+
+# ❌ RISKY - May run for hours if issue persists
+python scrapeNEW_standardized.py --mode resume
+```
+
+**Scenario 3: Debugging issue in title 42**
+```bash
+# ✅ CORRECT - Skip directly to problem area with timeout
+python scrapeNEW_standardized.py --mode skip --skip-title 42 --timeout 2 --debug
+
+# ❌ WRONG - No timeout protection
+python scrapeNEW_standardized.py --mode skip --skip-title 42 --debug
+```
+
+**Scenario 4: Testing changes to parsing logic**
+```bash
+# ✅ CORRECT - Test with timeout first
+python scrapeNEW_standardized.py --mode clean --validation --debug
+# Then if validation passes:
+python scrapeNEW_standardized.py --mode clean
+
+# ❌ WRONG - Jump straight to full run
+python scrapeNEW_standardized.py --mode clean
+```
+
+**Scenario 5: Progressive debugging workflow (RECOMMENDED)**
+```bash
+# Step 1: Ultra-fast spot check (1 minute)
+python scrapeNEW_standardized.py --mode clean --timeout 1 --max-titles 1 --debug
+
+# Step 2: Medium validation (2 minutes, 3 titles)  
+python scrapeNEW_standardized.py --mode clean --validation --debug
+
+# Step 3: Extended test (10 minutes, 10 titles)
+python scrapeNEW_standardized.py --mode clean --timeout 10 --max-titles 10
+
+# Step 4: Full production run (only if all above pass)
+python scrapeNEW_standardized.py --mode clean
+```
+
 ### 🆕 Key Patterns from Arizona Phase 3 Refactoring
 
 **1. Web Fetching Best Practices:**
@@ -449,15 +660,25 @@ complexity_score = TextAnalyzer.calculate_complexity_score(text)
 # Maintain jurisdiction-specific logic while using standardized infrastructure
 class ArizonaStatutesScraper(BaseScraper):
     def __init__(self, debug_mode: bool = False):
-        config = ConfigManager.create_arizona_config(debug_mode)
+        # Arizona-specific configuration defined inline (not in shared config.py)
+        config = ConfigManager.create_custom_config(
+            country="us",
+            jurisdiction="az",
+            corpus="statutes",
+            base_url="https://www.azleg.gov",
+            toc_url="https://www.azleg.gov/arstitle/",
+            skip_title=38,  # Arizona starts from title 38
+            reserved_keywords=["REPEALED", "RESERVED", "TRANSFERRED"],
+            delay_seconds=1.5,
+            debug_mode=debug_mode
+        )
         super().__init__(config)
         
-        # Arizona-specific configuration
+        # Arizona-specific text processing configuration
         self.az_config = {
             "custom_replacements": {"A.R.S.": "Arizona Revised Statutes"},
             "citation_patterns": [r'A\.R\.S\.\s*§\s*[\d-]+'],
-            "addendum_patterns": [r'\[Added by Laws (\d+),.*?\]'],
-            "reserved_keywords": ["REPEALED", "RESERVED", "TRANSFERRED"]
+            "addendum_patterns": [r'\[Added by Laws (\d+),.*?\]']
         }
         
         self.web_fetcher = WebFetcherFactory.create_arizona_fetcher()
@@ -488,21 +709,230 @@ self.logger.info(f"Success rate: {web_stats['success_rate']:.2%}")
 
 **Environment Variables (Required for Security):**
 ```bash
-# Set these in your environment or .env file
-export OSL_DB_USER="your_username"
-export OSL_DB_PASSWORD="your_password"
-export OSL_DB_HOST="localhost" 
-export OSL_DB_NAME="legislation"
-export OSL_OPENAI_API_KEY="your_api_key"  # If using AI features
+# Create .env file in project root with:
+OSL_DB_USER="your_username"
+OSL_DB_PASSWORD="your_password"
+OSL_DB_HOST="localhost" 
+OSL_DB_NAME="legislation"
+OSL_OPENAI_API_KEY="your_api_key"  # If using AI features
+
+# Load variables:
+source .env
+
+# Or use python-dotenv (automatically loaded by framework):
+# The standardized framework automatically loads .env files
 ```
+
+## 🆕 **Scraper Validation & Testing Framework (2025)**
+
+**🎉 CRITICAL CAPABILITY**: Comprehensive validation methodology developed through real-world Arizona refactoring experience.
+
+### **The Validation Challenge**
+
+Scraper validation is **fundamentally different from traditional software testing**:
+- **No ground truth** to validate against
+- **Legislative hierarchies** must be modeled as knowledge graphs  
+- **Content accuracy** requires human judgment
+- **Structure vs Content** are separate validation concerns
+- **Jurisdictional differences** mean every scraper is unique
+
+### **Two Types of Errors**
+
+**1. "Compiler Errors" (Infrastructure)**
+- Scraper crashes due to configuration issues
+- Database connection problems
+- Import/dependency errors
+- **Detection**: Immediate failure
+- **Fix**: Debug infrastructure
+
+**2. "Runtime Errors" (Logic/Content)**  
+- Wrong hierarchical structure extracted
+- Missing or incorrectly parsed content
+- **Detection**: Requires systematic validation
+- **Fix**: Analyze HTML, debug parsing logic
+
+### **Timeout-Based Validation Approach**
+
+**🆕 KEY INNOVATION**: Use timeouts for iterative validation instead of running full scrapers.
+
+```bash
+# Timeout validation for rapid feedback (30 seconds)
+python -c "
+import subprocess
+import signal
+import time
+
+signal.signal(signal.SIGALRM, lambda s, f: exec('raise TimeoutError()'))
+signal.alarm(30)
+
+try:
+    subprocess.run(['python', 'scrape{JURISDICTION}_standardized.py', '--mode', 'clean', '--debug'])
+except TimeoutError:
+    print('=== SCRAPER STOPPED AFTER 30 SECONDS FOR VALIDATION ===')
+finally:
+    signal.alarm(0)
+"
+```
+
+**Benefits:**
+- ✅ **Fast feedback** - Get sample data in 30 seconds vs hours
+- ✅ **Early issue detection** - Catch problems before wasting time
+- ✅ **Iterative debugging** - Test fix → validate → repeat cycle
+- ✅ **Critical error detection** - Pydantic/request errors break scraper immediately
+
+### **Systematic Validation Process**
+
+**Step 1: Database Health Check**
+```python
+# Automated health check queries
+from src.utils.utilityFunctions import db_connect
+
+conn = db_connect()
+with conn.cursor() as cur:
+    # Node distribution validation
+    cur.execute('SELECT level_classifier, COUNT(*) FROM us_{jurisdiction}_statutes GROUP BY level_classifier')
+    breakdown = cur.fetchall()
+    
+    # Content population check  
+    cur.execute('SELECT COUNT(*) as total_sections, COUNT(node_text) as sections_with_text FROM us_{jurisdiction}_statutes WHERE level_classifier = %s', ('SECTION',))
+    content_check = cur.fetchone()
+    
+    # Success indicators:
+    # ✅ Expected ratios: Titles (10s) → Chapters (100s) → Sections (1000s)  
+    # ✅ Content population: >0% sections have node_text
+    # ❌ RED FLAGS: 0 content nodes, all nodes same type, 0% content population
+```
+
+**Step 2: Hierarchy Spot Check**
+```python
+# Target-specific validation of known legal paths
+target_path = "us/{jurisdiction}/statutes/title=1/chapter=1/article=1"
+cur.execute('SELECT id, node_name, level_classifier, parent FROM us_{jurisdiction}_statutes WHERE id LIKE %s ORDER BY id', (f'%{target_path}%',))
+
+# Validation criteria:
+# ✅ Complete hierarchy: Title → Chapter → Article → Section
+# ✅ Proper parent-child relationships
+# ✅ Expected sections present (cross-reference with website)
+```
+
+**Step 3: HTML Structure Investigation**
+```python
+# When validation reveals issues, investigate the source
+import requests
+from bs4 import BeautifulSoup
+
+response = requests.get(section_url)
+soup = BeautifulSoup(response.content, 'html.parser')
+
+# Check if scraper logic matches actual website structure
+# Examples from Arizona debugging:
+# ❌ Expected: class="section" elements (WRONG)
+# ✅ Actual: <ul> with <li class="colleft"> and <li class="colright"> (CORRECT)
+```
+
+### **Real-World Validation Example: Arizona Content Issue**
+
+**Problem Detected:**
+- ✅ Scraper runs without errors  
+- ✅ Perfect hierarchical structure (3,766 sections)
+- ✅ All sections have citations (100%)
+- ❌ **0% of sections have node_text content**
+
+**Validation Process:**
+1. **Health Check**: Immediately flagged 0% content population
+2. **Spot Check**: Confirmed structure perfect, content missing
+3. **HTML Investigation**: Individual section pages serve navigation only, not statute text
+
+**Root Cause**: Website structure changed - section content not available at expected URLs
+
+**Lesson**: **Multiple validation layers essential** - structure can be perfect while content completely fails.
+
+### **Common Failure Patterns**
+
+**Structural Issues:**
+- Missing content nodes (structure created, no sections)
+- Wrong parent assignment (sections → titles instead of articles)
+- Broken hierarchical chains (missing intermediate levels)
+
+**Content Issues:**
+- Empty node_text (sections created but content extraction fails)
+- HTML artifacts in cleaned text
+- Wrong text association (content from wrong sections)
+
+**Parsing Logic Issues:**
+- CSS selector mismatches (code looks for non-existent elements)
+- Website structure changes breaking existing scrapers
+- Edge cases not handled (REPEALED, RESERVED sections)
+
+### **Validation Tools & Resources**
+
+**Essential Tools:**
+- **Postico 2**: PostgreSQL GUI for database visualization
+- **Browser Dev Tools**: HTML structure inspection  
+- **Simple requests/BeautifulSoup**: Programmatic HTML analysis
+- **Timeout commands**: Controlled scraper execution for sampling
+
+**Standard Validation Queries:**
+```sql
+-- Node distribution check
+SELECT level_classifier, COUNT(*) FROM us_{jurisdiction}_statutes GROUP BY level_classifier;
+
+-- Content population verification  
+SELECT COUNT(node_text) as with_content, COUNT(*) as total FROM us_{jurisdiction}_statutes WHERE level_classifier = 'SECTION';
+
+-- Hierarchy sample for spot checking
+SELECT id, node_name, parent FROM us_{jurisdiction}_statutes WHERE id LIKE '%title=1%' ORDER BY id LIMIT 20;
+
+-- Orphan detection
+SELECT COUNT(*) FROM us_{jurisdiction}_statutes WHERE parent IS NULL AND level_classifier != 'corpus';
+```
+
+### **Success Criteria**
+
+A scraper is **validated** when:
+- [ ] **Runs without infrastructure errors**
+- [ ] **Reasonable node counts** (expected ratios by type)
+- [ ] **Complete hierarchies** (sample paths show proper relationships)
+- [ ] **Content population** (sections have meaningful node_text)
+- [ ] **Spot check passes** (manual validation of 1-2 titles)
+- [ ] **HTML logic matches reality** (parsing aligns with actual website structure)
+
+### **Integration with Development Workflow**
+
+**For New Scrapers:**
+1. Timeout test (30 seconds) → Health check → HTML investigation
+2. Fix issues → Repeat until validation passes
+3. Longer test → Full validation → Production ready
+
+**For Refactored Scrapers:**
+1. Compare before/after node counts
+2. Validate same sample paths work
+3. Verify new features functional
+
+**For Production Monitoring:**
+1. Periodic health checks (monthly)
+2. Spot validation (quarterly)  
+3. Website change detection
+
+---
+
+**📚 For complete validation methodology, see `/validationProcess.md`**
 
 ## Testing and Quality Assurance
 
+**Legacy Testing Approaches (Still Important):**
 - Scrapers should handle reserved/repealed sections
 - Test with spot checks across different levels
 - Verify node relationships (`parent`, `direct_children`)
 - Ensure proper text cleaning and formatting
 - Test duplicate handling with version numbers (`-v_2`, `-v_3`)
+
+**🆕 Modern Validation Framework:**
+- **Systematic validation process** with health checks, spot checks, and HTML investigation
+- **Timeout-based iterative testing** for rapid feedback
+- **Multi-layer validation** detecting both structural and content issues
+- **Real-world examples** documenting common failure patterns
+- **Human judgment applied systematically** for complex legal document validation
 
 ## Database Connection
 

@@ -1,4 +1,3 @@
-
 import psycopg
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
@@ -13,6 +12,7 @@ import requests
 from requests.exceptions import HTTPError, ConnectionError
 import time
 import re
+import logging
 
 from selenium.webdriver.common.actions.wheel_input import ScrollOrigin
 from selenium.webdriver import ActionChains
@@ -24,6 +24,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.remote.webdriver import WebDriver
 
+# Set up a basic logger for legacy scrapingHelpers
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 def insert_jurisdiction_and_corpus_node(country_code: str, jurisdiction_code: str, corpus_code: str) -> Node:
     """
@@ -139,9 +147,12 @@ def get_url_as_soup(url: str, delay_time: Optional[int] = None) -> BeautifulSoup
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
     }
     try:
-        # Introduce a small delay to mimic human browsing
+        # 🔍 DELAY DEBUGGING: Legacy scrapingHelpers delay
         if delay_time:
+            logger.warning(f"⏰ LEGACY SCRAPING HELPERS DELAY: {delay_time}s")
             time.sleep(delay_time)
+        else:
+            logger.debug("🚀 LEGACY SCRAPING HELPERS NO DELAY")
         response = requests.get(url, headers=headers)
         response.raise_for_status()  # Raise an exception for HTTP errors
         response.encoding="utf-8"

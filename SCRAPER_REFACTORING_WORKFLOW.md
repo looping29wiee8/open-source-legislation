@@ -8,78 +8,63 @@ This document provides step-by-step instructions for Claude Code instances to au
 
 **Success Criteria**: 
 - ✅ Scraper runs without runtime errors
-- ✅ Creates expected database structure with correct node hierarchy
+- ✅ **Auto-creates database table** with correct schema (no more manual SQL!)
+- ✅ **Real database insertions** verified (no more fake logs)
+- ✅ **Enhanced debugging workflow** with clean/resume/skip modes working
 - ✅ Preserves all jurisdiction-specific parsing logic exactly
-- ✅ Uses standardized framework components (BaseScraper, WebFetcher, TextProcessor, etc.)
+- ✅ Uses standardized framework components (BaseScraper, WebFetcher, TextProcessor, DatabaseManager, etc.)
 
-## Pre-Conditions
+## Environment Setup
 
-Before starting, verify these conditions are met:
+### Step 0: Initialize Working Environment
 
-1. **Database Configuration**: Environment variables are set
-   ```bash
-   echo $OSL_DB_USER      # Should show database username
-   echo $OSL_DB_PASSWORD  # Should show database password  
-   echo $OSL_DB_HOST      # Should show "localhost"
-   echo $OSL_DB_NAME      # Should show shared database name (e.g., "legislation")
-   ```
-   
-   **Note**: Multiple Claude Code instances can safely share the same database since each jurisdiction writes to its own table (e.g., `us_az_statutes`, `us_ca_statutes`, etc.)
+Before starting the refactoring process, you need to properly set up your working environment. Follow these steps exactly:
 
-2. **Python Environment**: Dependencies are installed
-   ```bash
-   pip list | grep -E "(requests|beautifulsoup4|psycopg|pydantic)"
-   ```
+#### 1. Clone and Navigate to Repository
+```bash
+# Clone the repository (if not already done)
+git clone https://github.com/spartypkp/open-source-legislation.git
+cd open-source-legislation
 
-3. **Project Structure**: Verify you're in the correct directory
-   ```bash
-   pwd  # Should end with /open-source-legislation
-   ls src/utils/base/  # Should show __init__.py, scraper.py, config.py, credentials.py
-   ```
+# Verify you're in the correct location
+pwd  # Should end with /open-source-legislation
+ls   # Should show: src/, pyproject.toml, README.md, etc.
+```
 
-4. **Database Schema**: Each jurisdiction table follows the standard schema:
-   ```sql
-   CREATE TABLE us_{jurisdiction}_{corpus} (
-       id text PRIMARY KEY,
-       citation text NOT NULL,
-       link text,
-       status text,
-       node_type text NOT NULL,
-       top_level_title text,
-       level_classifier text NOT NULL,
-       number text,
-       node_name text,
-       alias text,
-       node_text jsonb,
-       definitions jsonb,
-       core_metadata jsonb,
-       processing jsonb,
-       addendum jsonb,
-       dates jsonb,
-       summary text,
-       hyde text[],
-       agency text,
-       parent text,
-       direct_children text[],
-       siblings text[],
-       incoming_references jsonb,
-       text_embedding vector(1536),
-       summary_embedding vector(1536),
-       hyde_embedding vector(1536),
-       date_created timestamp DEFAULT CURRENT_TIMESTAMP,
-       date_modified timestamp DEFAULT CURRENT_TIMESTAMP,
-       name_embedding vector(1536)
-   );
-   ```
-   
-   The Pydantic `Node` model represents this schema. Tables are auto-created by the framework.
+#### 2. Create and Activate Virtual Environment
+```bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Verify activation
+which python  # Should point to venv/bin/python
+```
+
+#### 3. Install Project with Dependencies
+```bash
+# Install project in development mode with all dependencies
+pip install -e ".[dev]"
+
+# This single command:
+# ✅ Installs all production dependencies
+# ✅ Installs development tools (pytest, black, mypy, etc.)
+# ✅ Sets up the project for editable installation
+# ✅ Eliminates PYTHONPATH issues
+
+# Verify installation
+pip list | grep -E "(requests|beautifulsoup4|psycopg|pydantic)"
+```
+
 
 ## Phase 1: Analysis & Backup
 
 ### Step 1: Locate Target Scraper & Initialize Progress Tracking
 ```bash
 # Navigate to jurisdiction directory
-cd src/scrapers/us/{jurisdiction}/statutes/
+cd src/scrapers/us/(states)/{jurisdiction}/statutes/
 
 # List existing files
 ls -la
@@ -192,9 +177,10 @@ Convert global configuration to ScraperConfig:
 # TOC_URL = "https://www.azleg.gov/arstitle/"  # jurisdiction-specific
 # USER = "will2"  # SECURITY ISSUE - hardcoded credentials
 
-# REPLACE with ScraperConfig:
+# REPLACE with ScraperConfig (jurisdiction-specific config defined inline):
 class {Jurisdiction}StatutesScraper(BaseScraper):
     def __init__(self, debug_mode: bool = False):
+        # Jurisdiction-specific configuration defined inline (not in shared config.py)
         config = ConfigManager.create_custom_config(
             country="us",
             jurisdiction="{jurisdiction_code}",  # e.g., "az", "ca", "tx"
@@ -202,6 +188,8 @@ class {Jurisdiction}StatutesScraper(BaseScraper):
             base_url="{jurisdiction_base_url}",  # Extract from original
             toc_url="{jurisdiction_toc_url}",    # Extract from original
             skip_title=0,  # Extract from original if present
+            reserved_keywords=["REPEALED", "RESERVED"],  # Add jurisdiction-specific keywords
+            delay_seconds=1.5,  # Adjust based on site responsiveness
             debug_mode=debug_mode
         )
         super().__init__(config)
@@ -347,38 +335,307 @@ if __name__ == "__main__":
 - ✅ Updated infrastructure calls while preserving parsing logic
 - ✅ Added standardized main function
 
-### Configuration Extracted
+### Configuration Extracted & Defined Inline
 - **Country**: us
 - **Jurisdiction**: {jurisdiction}
-- **Corpus**: statutes
+- **Corpus**: statutes  
 - **Base URL**: {base_url}
 - **TOC URL**: {toc_url}
+- **Skip Title**: {skip_title} (if applicable)
+- **Reserved Keywords**: {keywords} (jurisdiction-specific)
+- **Delay Seconds**: {delay} (site-specific)
 
 ---
 ```
 
-## Phase 3: Testing & Debugging
+## Phase 3: Enhanced Testing & Debugging Workflow
 
-### Step 10: First Test Run
+**🆕 Revolutionary testing approach using the enhanced debugging framework with timeout-based validation.**
+
+### **🎯 ENHANCED: Built-in Timeout Validation System (2025)**
+
+**🚨 CRITICAL FOR CLAUDE CODE: NEVER run scrapers without timeout conditions during debugging. Use the built-in enhanced timeout system.**
+
+**⚠️ MANDATORY USAGE PATTERNS:**
+
 ```bash
+# Navigate to scraper directory
 cd src/scrapers/us/{jurisdiction}/statutes/
-python scrape{JURISDICTION}.py
+
+# ✅ ALWAYS use these patterns for validation/debugging
+
+# Option 1: Validation mode (RECOMMENDED) - automatic smart defaults
+python scrape{JURISDICTION}_standardized.py --mode clean --validation --debug
+# Automatically sets: 2 min timeout, 3 titles max, 100 nodes max
+
+# Option 2: Custom timeout combinations for specific debugging
+python scrape{JURISDICTION}_standardized.py --mode clean --timeout 2 --max-titles 3 --debug
+python scrape{JURISDICTION}_standardized.py --mode clean --max-nodes 50 --debug  
+python scrape{JURISDICTION}_standardized.py --mode skip --skip-title 5 --timeout 1 --debug
+
+# Option 3: Ultra-fast spot checks
+python scrape{JURISDICTION}_standardized.py --mode clean --timeout 1 --max-titles 1 --debug
+
+# ❌ NEVER do this during debugging (will run for hours without feedback)
+python scrape{JURISDICTION}_standardized.py --mode clean
+
+# ❌ DEPRECATED - Don't use external subprocess timeouts anymore
+# Old signal.SIGALRM approach is no longer needed
 ```
 
-**Expected Outcome**: Errors (this is normal for first run)
+**Why Enhanced Timeout System Works:**
+- ✅ **Cross-platform** - Works on Windows/Mac/Linux (no signal.SIGALRM dependency)
+- ✅ **Multiple stopping conditions** - Time AND/OR title count AND/OR node count
+- ✅ **Partial results preserved** - Database contains sample data for immediate validation
+- ✅ **Graceful shutdown** - Proper cleanup and comprehensive statistics
+- ✅ **Built-in** - No external subprocess management needed
+- ✅ **Fast feedback** - Sample data in 30 seconds - 2 minutes vs hours
+- ✅ **Early issue detection** - Infrastructure problems surface immediately  
+- ✅ **Iterative debugging** - Fix → test → validate cycle
+- ✅ **Critical error protection** - Pydantic/connection errors break scraper immediately
+- ✅ **Resource efficiency** - Don't waste time on broken scrapers
 
-### Step 11: Debug Common Errors
+### Step 10: Enhanced Timeout Test + Database Health Check
 
-**Error Type 1: Import Errors**
+**🚨 MANDATORY: ALWAYS start with built-in timeout validation to get sample data for analysis.**
+
+**Phase 3A: Enhanced Timeout Sample Collection**
+```bash
+# Run built-in validation mode for quick sample data
+python scrape{JURISDICTION}_standardized.py --mode clean --validation --debug
+
+# Expected output:
+# - Stopping conditions: timeout: 2 min, max titles: 3, max nodes: 100, validation mode
+# - 🛑 SCRAPING STOPPED: [reason]
+# - === PARTIAL RESULTS SUMMARY ===
+# - Titles processed: X, Nodes created: Y
+```
+
+**Phase 3B: Immediate Health Check**
+```python
+# Quick validation script - run IMMEDIATELY after timeout test
+from src.utils.utilityFunctions import db_connect
+
+conn = db_connect()
+with conn.cursor() as cur:
+    print('=== NODE DISTRIBUTION ===')
+    cur.execute('SELECT level_classifier, COUNT(*) FROM us_{jurisdiction}_statutes GROUP BY level_classifier ORDER BY COUNT(*) DESC')
+    breakdown = cur.fetchall()
+    total_nodes = sum(row[1] for row in breakdown)
+    
+    for row in breakdown:
+        percentage = row[1]/total_nodes*100 if total_nodes > 0 else 0
+        print(f'{row[0]}: {row[1]} ({percentage:.1f}%)')
+    print(f'TOTAL: {total_nodes}')
+    
+    print('\n=== CONTENT POPULATION CHECK ===')
+    cur.execute('SELECT COUNT(*) as total_sections, COUNT(node_text) as sections_with_text, COUNT(citation) as sections_with_citations FROM us_{jurisdiction}_statutes WHERE level_classifier = %s', ('SECTION',))
+    result = cur.fetchone()
+    if result and result[0] > 0:
+        print(f'Total sections: {result[0]}')
+        print(f'Sections with node_text: {result[1]} ({result[1]/result[0]*100:.1f}%)')
+        print(f'Sections with citations: {result[2]} ({result[2]/result[0]*100:.1f}%)')
+    else:
+        print('No sections found - potential section processing issue')
+
+conn.close()
+```
+
+**Expected Results:**
+```
+=== NODE DISTRIBUTION ===
+SECTION: 3766 (86.5%)     # Good - majority are content nodes
+ARTICLE: 442 (10.2%)      # Good - intermediate structure nodes  
+CHAPTER: 132 (3.0%)       # Good - structure nodes
+TITLE: 10 (0.2%)          # Good - top-level structure nodes
+TOTAL: 4352
+
+=== CONTENT POPULATION CHECK ===
+Total sections: 3766
+Sections with node_text: 0 (0.0%)      # ❌ CRITICAL ISSUE!
+Sections with citations: 3766 (100.0%) # ✅ Good
+```
+
+**Interpretation:**
+- ✅ **Structure Working**: Good node distribution ratios
+- ❌ **Content Failing**: 0% node_text population = content extraction broken
+
+### Step 11: Verify Database Results
+
+**Critical**: Always verify that actual data was inserted into the database.
+
+```python
+# Quick verification script
+from src.utils.utilityFunctions import db_connect
+conn = db_connect()
+with conn.cursor() as cur:
+    cur.execute('SELECT COUNT(*) FROM us_{jurisdiction}_statutes')
+    count = cur.fetchone()[0]
+    print(f'✅ Total nodes: {count}')
+    
+    cur.execute('SELECT level_classifier, COUNT(*) FROM us_{jurisdiction}_statutes GROUP BY level_classifier')
+    breakdown = cur.fetchall()
+    print(f'✅ Node breakdown: {breakdown}')
+conn.close()
+```
+
+**Success Indicators:**
+- ✅ Count > 0 (actual data inserted)
+- ✅ Multiple node types (title, chapter, section, etc.)
+- ✅ Hierarchical structure preserved
+
+### Step 12: Test Resume Functionality
+
+**Test the intelligent resume detection:**
+
+```bash
+# This should auto-detect where to continue
+python scrape{JURISDICTION}_standardized.py --mode resume --debug
+```
+
+**Expected Behavior:**
+```
+2025-06-01 15:52:26,152 - us_{jurisdiction}_statutes - INFO - RESUME mode: Auto-detected resume point at title X
+```
+
+**If resume detection fails:**
+- Check `top_level_title` field population
+- Verify title numbering is consistent
+- Use manual override: `--skip-title X`
+
+### Step 13: Test Skip Mode for Debugging
+
+**For debugging specific problem areas:**
+
+```bash
+# Skip to a specific title for targeted debugging
+python scrape{JURISDICTION}_standardized.py --mode skip --skip-title 25 --debug
+```
+
+### Step 14: Comprehensive Testing Scenarios
+
+**Test all debugging modes to ensure robustness:**
+
+```bash
+# Scenario 1: Fresh start
+python scrape{JURISDICTION}_standardized.py --mode clean
+
+# Scenario 2: Interrupted scraper recovery  
+# (Ctrl+C during run, then resume)
+python scrape{JURISDICTION}_standardized.py --mode resume
+
+# Scenario 3: Debugging specific section
+python scrape{JURISDICTION}_standardized.py --mode skip --skip-title 42
+
+# Scenario 4: Full production run
+python scrape{JURISDICTION}_standardized.py
+```
+
+### Step 15: Debug Common Issues
+
+**With the enhanced framework, many traditional issues are eliminated, but some new patterns may emerge:**
+
+#### **✅ ELIMINATED Issues (No Longer Occur):**
+- ❌ "Table doesn't exist" errors → **Auto-creation handles this**
+- ❌ Hardcoded skip_title values → **Dynamic resume detection**
+- ❌ Fake success logs → **Real database verification**
+- ❌ Manual SQL file management → **Schema auto-generation**
+- ❌ Environment variable mismatches → **Unified credential management**
+
+#### **🆕 NEW Common Issues:**
+
+**Issue 1: Import/Setup Problems**
 ```python
 # Error: ModuleNotFoundError: No module named 'src.utils.base'
-# Fix: Add path setup at the very top
-import sys
-from pathlib import Path
-current_file = Path(__file__).resolve()
-while current_file.name != 'src':
-    current_file = current_file.parent
-sys.path.insert(0, str(current_file.parent))
+# Solution: Ensure project is installed correctly
+pip install -e ".[dev]"
+
+# Error: DatabaseError: Database credentials not configured  
+# Solution: Check environment variables
+echo $OSL_DB_USER $OSL_DB_HOST $OSL_DB_NAME
+```
+
+**Issue 2: Resume Detection Problems**
+```bash
+# Problem: Resume mode always starts from 0
+# Solution: Check top_level_title field population
+python -c "
+from src.utils.utilityFunctions import regular_select
+result = regular_select('SELECT DISTINCT top_level_title FROM us_{jurisdiction}_statutes LIMIT 5')
+print('Title values:', result)
+"
+
+# Fix: Ensure title numbers are properly set in create_structure_node()
+```
+
+**Issue 3: Jurisdiction-Specific Parsing Errors**
+```python
+# Error: AttributeError: 'NoneType' object has no attribute 'find'
+# Solution: Add robust error handling for jurisdiction-specific HTML patterns
+
+try:
+    element = soup.find(class_="jurisdiction-specific-class")
+    if element:
+        # Process element
+    else:
+        self.logger.warning("Expected HTML structure not found")
+except Exception as e:
+    self.logger.error(f"Parsing error: {e}")
+    continue
+```
+
+**Issue 4: Performance/Memory Issues**
+```python
+# Problem: Slow batch processing or memory usage
+# Solution: Adjust batch size or add memory monitoring
+
+self.batch_size = 25  # Reduce if memory issues
+self._flush_batch()   # Force flush more frequently
+```
+
+### Step 16: Final Validation & Success Criteria
+
+**Once all testing scenarios pass, verify complete success:**
+
+```bash
+# 1. Run comprehensive test
+python scrape{JURISDICTION}_standardized.py --mode clean --debug
+
+# 2. Verify database results  
+python -c "
+from src.utils.utilityFunctions import db_connect
+conn = db_connect()
+with conn.cursor() as cur:
+    cur.execute('SELECT COUNT(*) FROM us_{jurisdiction}_statutes')
+    total = cur.fetchone()[0]
+    
+    cur.execute('SELECT level_classifier, COUNT(*) FROM us_{jurisdiction}_statutes GROUP BY level_classifier ORDER BY COUNT(*) DESC')
+    breakdown = cur.fetchall()
+    
+    print(f'✅ SUCCESS: {total} total nodes inserted')
+    print(f'✅ Node hierarchy: {breakdown}')
+    
+    if total > 100:  # Adjust threshold based on jurisdiction
+        print('✅ VALIDATION PASSED: Substantial data extracted')
+    else:
+        print('⚠️  WARNING: Low node count - verify completeness')
+conn.close()
+"
+
+# 3. Test all debugging modes
+python scrape{JURISDICTION}_standardized.py --mode resume  # Should detect continuation point
+python scrape{JURISDICTION}_standardized.py --mode skip --skip-title 5  # Should start from title 5
+```
+
+**✅ REFACTORING SUCCESS CRITERIA:**
+- [ ] Auto-creates database table without manual SQL
+- [ ] Processes multiple titles successfully (>100 nodes minimum)
+- [ ] Clean mode works (drops/recreates table)
+- [ ] Resume mode works (auto-detects continuation point)  
+- [ ] Skip mode works (starts from specified title)
+- [ ] Preserves original parsing logic exactly
+- [ ] Uses standardized framework components
+- [ ] Real database insertions verified (no fake logs)
 
 # Then import framework
 from src.utils.base import setup_project_path, BaseScraper, ConfigManager
@@ -448,70 +705,86 @@ For each error encountered:
 
 4. **Repeat until no errors**
 
-### Step 13: Validate Success & Document Testing
+## Phase 4: Documentation & Completion
 
-Once the scraper runs without errors, validate the output:
+### Step 17: Update Progress Documentation
 
-```python
-# Add validation logic to scraper
-def validate_output(self):
-    """Validate that scraper produced expected results."""
-    
-    # Check database has nodes
-    nodes = self.db.get_all_nodes()
-    assert len(nodes) > 0, "No nodes were created"
-    
-    # Check node types are valid
-    for node in nodes:
-        assert node.id and node.id.raw_id, f"Node missing ID: {node}"
-        assert node.node_type in ["structure", "content"], f"Invalid node type: {node.node_type}"
-        assert node.level_classifier, f"Node missing level classifier: {node}"
-        
-    # Verify database schema compliance
-    # Each table should follow the standard schema with required fields:
-    # id (text PRIMARY KEY), citation, node_type, level_classifier, etc.
-    
-    # Check hierarchy makes sense
-    title_nodes = [n for n in nodes if n.level_classifier == "TITLE"]
-    chapter_nodes = [n for n in nodes if n.level_classifier == "CHAPTER"]
-    section_nodes = [n for n in nodes if n.level_classifier == "SECTION"]
-    
-    print(f"✅ Validation successful!")
-    print(f"Created {len(nodes)} total nodes")
-    print(f"  - {len(title_nodes)} titles")
-    print(f"  - {len(chapter_nodes)} chapters")
-    print(f"  - {len(section_nodes)} sections")
-    
-    return True
+**Update REFACTORING_PROGRESS.md with the enhanced workflow results:**
 
-# Add to end of scrape_implementation():
-self.validate_output()
-```
-
-**Update REFACTORING_PROGRESS.md:**
 ```markdown
-## Phase 3: Testing & Debugging Complete ✅
+## ✅ REFACTORING COMPLETED - Enhanced Framework
 
-### Debugging History
-- **Attempt 1**: [Error encountered] → [Fix applied]
-- **Attempt 2**: [Error encountered] → [Fix applied]
-- **Final Run**: ✅ Success - No errors
+### Framework Upgrades Applied:
+- ✅ **Auto-Table Creation**: No more manual SQL files
+- ✅ **Enhanced Debugging**: Clean/Resume/Skip modes implemented
+- ✅ **Real Database Operations**: Verified actual insertions (552 nodes)
+- ✅ **Dynamic Resume Detection**: Auto-detects continuation points
+- ✅ **Progress Tracking**: Reliable resuming after interruptions
 
-### Validation Results
-- ✅ Scraper runs without runtime errors
-- ✅ Database table `us_{jurisdiction}_{corpus}` created
-- ✅ Nodes created with correct hierarchy
-- ✅ All required fields populated
-- ✅ Framework components properly integrated
+### Testing Results:
+```bash
+# Clean Mode Test
+✅ SUCCESS: 552 total nodes inserted
+✅ Node hierarchy: [('SECTION', 417), ('CHAPTER', 123), ('TITLE', 10)]
 
-### Database Statistics
-- **Total Nodes**: [number]
-- **Title Nodes**: [number]
-- **Chapter Nodes**: [number]
-- **Section Nodes**: [number]
+# Resume Mode Test  
+✅ RESUME mode: Auto-detected resume point at title 12
 
----
+# Skip Mode Test
+✅ SKIP mode: Successfully started from title 25
 ```
+
+### Validation Complete:
+- [x] Auto-creates database table without manual SQL
+- [x] Processes multiple titles successfully (552 nodes)
+- [x] Clean mode works (drops/recreates table)
+- [x] Resume mode works (auto-detects continuation point)  
+- [x] Skip mode works (starts from specified title)
+- [x] Preserves original parsing logic exactly
+- [x] Uses standardized framework components
+- [x] Real database insertions verified (no fake logs)
+```
+
+### Step 18: Final Cleanup & Commit Preparation
+
+**Prepare the refactored scraper for integration:**
+
+```bash
+# 1. Remove any backup files created during refactoring
+rm scrape{JURISDICTION}_backup.py  # If created
+
+# 2. Test final production run
+python scrape{JURISDICTION}_standardized.py --mode clean
+
+# 3. Verify all functionality one final time
+python scrape{JURISDICTION}_standardized.py --mode resume
+```
+
+**File Checklist:**
+- [x] `scrape{JURISDICTION}_standardized.py` - Main refactored scraper
+- [x] `REFACTORING_PROGRESS.md` - Updated with results  
+- [x] `refactoring.md` - Analysis and process documentation
+- [x] Original scraper preserved (not deleted)
+
+## 🎉 REFACTORING COMPLETE!
+
+**The {JURISDICTION} scraper has been successfully upgraded to use the enhanced standardized framework with:**
+
+### ✅ Revolutionary Improvements:
+- **Automatic table creation** - No more manual SQL management
+- **Enhanced debugging workflow** - Clean/Resume/Skip modes for robust development
+- **Real database operations** - Verified actual data insertion (no fake logs)
+- **Dynamic resume detection** - Intelligent recovery from interruptions
+- **Progress tracking** - Reliable resuming and metadata storage
+- **Unified credential management** - Secure environment-based configuration
+
+### ✅ Preserved Assets:
+- **All original parsing logic** maintained exactly
+- **Jurisdiction-specific quirks** handled properly  
+- **Performance optimizations** enhanced with batch processing
+- **Error handling** improved with standardized patterns
+
+**The scraper is now ready for production use with significantly improved developer experience and reliability.** 🚀
 
 ## Phase 4: Final Validation & Reporting
 
